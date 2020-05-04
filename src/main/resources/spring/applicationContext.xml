@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+    xmlns:p="http://www.springframework.org/schema/p" 
+    xmlns:context="http://www.springframework.org/schema/context"
+    xmlns:aop="http://www.springframework.org/schema/aop"
+    xmlns:tx="http://www.springframework.org/schema/tx"
+    xmlns:jpa="http://www.springframework.org/schema/data/jpa"
+    xsi:schemaLocation="http://www.springframework.org/schema/beans 
+                        http://www.springframework.org/schema/beans/spring-beans.xsd 
+                        http://www.springframework.org/schema/context 
+                        http://www.springframework.org/schema/context/spring-context.xsd 
+                        http://www.springframework.org/schema/aop 
+                        http://www.springframework.org/schema/aop/spring-aop.xsd  
+                        http://www.springframework.org/schema/data/jpa
+                        http://www.springframework.org/schema/data/jpa/spring-jpa-1.8.xsd  
+                        http://www.springframework.org/schema/tx 
+                        http://www.springframework.org/schema/tx/spring-tx.xsd">
+
+    <!-- @Required, @Autowired, @PostConstruct, @PreDestroy, @Resource, @PersistenceContext 
+        and @PersistenceUnit 等注解需要配置相应的bean才可以使用，这里使用context:annotation-config把这些bean一键配置 -->
+    <!-- <context:annotation-config /> -->
+
+    <!-- applicationContext是spring的配置文件，里面配置的bean对springmvc可见，可以被其使用 -->
+    <!-- 作为父容器的spring容器 不需要controller注解，这个注解的实例应该由springmvc提供并使用 -->
+    <!-- context:component-scan配置能够使@Component, @Repository, @Service, @Controller, 
+        @RestController, @ControllerAdvice, and @Configuration 等原型注入spring bean。 
+                    同时context:annotation-config配置的功能也被启用，无需再配置。 -->
+    <context:component-scan base-package="com.lwr">
+        <context:exclude-filter type="annotation"
+            expression="org.springframework.stereotype.Controller" />
+        <context:exclude-filter type="annotation"
+            expression="org.springframework.web.bind.annotation.RestController" />
+    </context:component-scan>
+
+    <!-- 解析jdbc配置文件内容，然后在配置文件中通过${}使用 -->
+    <context:property-placeholder location="classpath:spring/jdbc.properties" />
+
+    <!-- spring配置数据源无连接池 -->
+	<!-- <bean id="dataSource"
+		class="org.springframework.jdbc.datasource.DriverManagerDataSource">
+        <property name="driverClassName" value="${jdbc.driverClassName}"/>       
+        <property name="url" value="${jdbc.url}"/>  
+        <property name="username" value="${jdbc.username}"/>       
+        <property name="password" value="${jdbc.password}"/>
+	</bean> -->
+	
+	<!-- 使用C3P0数据源 -->
+    <bean id="dataSource"
+        class="com.mchange.v2.c3p0.ComboPooledDataSource" destroy-method="close">
+        <property name="driverClass" value="${jdbc.driverClassName}"/>       
+        <property name="jdbcUrl" value="${jdbc.url}"/>  
+        <property name="user" value="${jdbc.username}"/>       
+        <property name="password" value="${jdbc.password}"/>
+        <property name="initialPoolSize" value="3"/>
+        <property name="minPoolSize" value="3"/>
+        <property name="maxPoolSize" value="8"/>
+        <!-- 链接用完了自动增量 -->
+        <property name="acquireIncrement" value="5"/>   
+        <!-- 每600秒查连接池中的所有空闲连接，超过mysql长连接wait_timeout（在MySQL中设置）将会被回收，
+                                  导致该连接为无效连接。Default: 0 不检查 -->
+        <property name="idleConnectionTestPeriod" value="600" />
+        <property name="preferredTestQuery" value="select 1" />
+        <!-- 如果设为true那么在取得连接的同时将校验连接的有效性。若检测为无效，则自动重新获取连接。default: false  -->
+        <property name="testConnectionOnCheckin" value="true" />
+    </bean>
+    
+    
+    
+     <!-- 1、生成jpa-bean工厂 -->
+    <bean id="entityManagerFactory"
+        class="org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean">
+        <!-- 数据源 -->
+        <property name="dataSource" ref="dataSource" />
+        <!-- jpa适配器，这里使用hibernate的实现 -->
+        <property name="jpaVendorAdapter">
+            <bean
+                class="org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter">
+                <!-- 支持的数据库类型 -->
+                <property name="Database" value="MYSQL" />
+                <!-- 正向工程 -->
+                <!-- <property name="generateDdl" value="false" /> -->
+                <!-- 控制台输出sql -->
+                <property name="showSql" value="true" />
+            </bean>
+        </property>
+        <!-- 实体类的包路径扫描 -->
+        <property name="packagesToScan">
+            <list>
+                <value>com.lwr.entity</value>
+            </list>
+        </property>
+    </bean>
+    <!-- 2、jpa的dao类的扫描路径，扫描自动生成bean交由spring管理 -->
+    <jpa:repositories base-package="com.lwr.dao" 
+        entity-manager-factory-ref="entityManagerFactory" 
+        transaction-manager-ref="transactionManager"/>
+
+    <!-- 3、配置jpa的事务管理器 -->
+    <bean id="transactionManager"
+        class="org.springframework.orm.jpa.JpaTransactionManager">
+        <property name="entityManagerFactory"
+            ref="entityManagerFactory"></property>
+    </bean>
+
+    
+    <!-- 即使实现了接口，也强制使用cglib动态代理不再默认使用jdk代理,jdk8之后的jdk代理性能也不错了 -->
+    <!-- <aop:aspectj-autoproxy  proxy-target-class="true"/> -->
+    
+    <!-- 第一种事务方式：开始事务注解@Transactional，加了这个注解的类或方法自动配置事务 -->
+	<tx:annotation-driven transaction-manager="transactionManager"/>
+	
+	<!-- 第二种事务方式：使用aop切面加入事务tx -->
+	<!-- 配置事务的传播特性 1propagation 2read-only 3isoloation 4timeout 5rollbackFor 6rollbackForClassname 7NorollbackFor 8NorollbackForClassname-->
+	<!-- propagation="REQUIRED"表示，如果存在事务就共用这个事务，如果没有就新建一个，整个方法作为一个事务报错回滚 -->
+	<!-- read-only="true"说这是不涉及数据更新是只读的，从而框架做优化处理 -->
+    <!-- <tx:advice id="txAdvice" transaction-manager="transactionManager">
+        <tx:attributes>
+            <tx:method name="find*" propagation="REQUIRED" read-only="true"/>
+            <tx:method name="get*" propagation="REQUIRED"  read-only="true"/>
+            <tx:method name="query*" propagation="REQUIRED"  read-only="true"/>
+            <tx:method name="*" propagation="REQUIRED" />
+        </tx:attributes>
+    </tx:advice> -->
+    <!-- 规则：返回值 com.*.service.impl.类名.方法名(参数) -->
+    <!-- <aop:config>
+        <aop:pointcut id="targetService" expression="execution(* com.lwr.service.impl.*.*(..))"/>
+        <aop:advisor id="serviceAdvisor" advice-ref="txAdvice" pointcut-ref="targetService" />
+    </aop:config> -->
+    
+	<!-- 第三种事务方式：使用事务拦截器TransactionInterceptor和bean名称代理 -->
+	<!-- 事务拦截器，并定义对应方法的事务传播级别 -->
+	<!-- <bean id="transactionInterceptor" class="org.springframework.transaction.interceptor.TransactionInterceptor">
+        <property name="transactionManager" ref="transactionManager"/>
+        <property name="transactionAttributes">
+            <props>
+                <prop key="get*">PROPAGATION_REQUIRED,readOnly</prop>
+                <prop key="find*">PROPAGATION_REQUIRED,readOnly</prop>
+                <prop key="query*">PROPAGATION_REQUIRED,readOnly</prop>
+                <prop key="*">PROPAGATION_REQUIRED</prop>
+            </props>
+        </property>
+    </bean> -->
+    <!-- 通过bean名称代理拦截注入事务，beanNames可以使用通配符*，@Autowired的bean名也需要匹配 -->
+   <!--  <bean id="autoproxy"
+        class="org.springframework.aop.framework.autoproxy.BeanNameAutoProxyCreator">
+        <property name="beanNames">
+            <list>
+                <value>*ServiceImpl</value>
+            </list>
+        </property>
+        <property name="interceptorNames">
+            <list>
+                <value>transactionInterceptor</value>
+            </list>
+        </property>
+    </bean> -->
+    
+   <!--  <import resource="spring-beans.xml"/> -->
+	
+</beans>
